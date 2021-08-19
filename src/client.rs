@@ -134,17 +134,18 @@ impl Client {
         buf.append(&mut p_buf);
         buf.push(b'\n');
 
-        if stream.write_all(buf.as_slice()).is_err() {
-            return Default::default();
+        let write_res = stream.write_all(buf.as_slice());
+        if write_res.is_err(){
+            return AuthResponse::default();
         }
-
         let mut buf: [u8; 512] = [0; 512];
-        if stream.read(&mut buf).is_err() {
-            return Default::default();
+        let read_res = stream.read(&mut buf);
+        if read_res.is_err(){
+            return AuthResponse::default();
         }
         let mut vb = Vec::from(buf);
         if !(PacketType::Response as u8).eq(&vb[0]) {
-            return Default::default();
+            return AuthResponse::default();
         }
         vb.remove(0);
         if let Ok(msg) = std::str::from_utf8(vb.as_slice()) {
