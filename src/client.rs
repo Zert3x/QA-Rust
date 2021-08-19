@@ -102,7 +102,7 @@ impl Client {
         loop {
             let x = Self::communicate(stream.try_clone().unwrap(),PacketType::Heartbeat, serde_json::to_string(&Self::generate_heartbeat(session_id.clone(), session_salt.clone(), program_key.clone(), variable_key.clone(), username.clone(), password.clone(), hwid.clone(), version.clone())).unwrap());
             if !x.status.eq("success") {
-                println!("{}", x.message);
+                println!("Suspicious activity detected.");
                 exit(0);
             }
             std::thread::sleep(Duration::from_secs(5));
@@ -134,20 +134,28 @@ impl Client {
         buf.append(&mut p_buf);
         buf.push(b'\n');
 
-        stream.write_all(buf.as_slice()).expect("write to server");
+        if stream.write_all(buf.as_slice()).is_err() {
+            return Default::default();
+        }
 
         let mut buf: [u8; 512] = [0; 512];
-        stream.read(&mut buf).expect("read");
+        if stream.read(&mut buf).is_err() {
+            return Default::default();
+        }
         let mut vb = Vec::from(buf);
         if !(PacketType::Response as u8).eq(&vb[0]) {
             return Default::default();
         }
         vb.remove(0);
-        let msg = std::str::from_utf8(vb.as_slice()).expect("xxx");
-        let m = msg.trim_matches(char::from(0));
-        let m = m.trim_end_matches('\n');
+        if let Ok(msg) = std::str::from_utf8(vb.as_slice()) {
+            let m = msg.trim_matches(char::from(0));
+            let m = m.trim_end_matches('\n');
 
-        serde_json::from_str(m).expect("bad server response")
+            if let Ok(response) = serde_json::from_str::<AuthResponse>(m) {
+                return response;
+            }
+        }
+        Default::default()
     }
 
     fn generate_auth_data(&self) -> AuthData {
@@ -253,7 +261,6 @@ impl Client {
         let mut result = vec![0; data.len() + t.block_size()];
         let mut len = d.update(data, &mut result).unwrap();
         len += d.finalize(&mut result).unwrap();
-        println!("{}", result.iter().map(|x| *x as char).collect::<String>());
         result.truncate(len);
 
         result.into_iter().map(|x| x as char).collect::<String>()
