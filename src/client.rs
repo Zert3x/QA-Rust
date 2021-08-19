@@ -63,38 +63,39 @@ impl Client {
     }
 
     pub fn new(p_key: String, v_key: String, version: String) -> Result<Client, AuthServerError> {
-        let server = SERVER_LIST.first().ok_or(AuthServerError)?;
+        for server in SERVER_LIST {
+            let sock_addr = SocketAddr::from_str(format!("{}:7005", server).as_str())
+                .ok()
+                .ok_or(AuthServerError)?;
+            let stream = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(3))
+                .ok()
+                .ok_or(AuthServerError)?;
 
-        let sock_addr = SocketAddr::from_str(format!("{}:7005", server).as_str())
-            .ok()
-            .ok_or(AuthServerError)?;
-        let stream = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(3))
-            .ok()
-            .ok_or(AuthServerError)?;
+            let rng = thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(32)
+                .map(char::from)
+                .collect::<String>();
+            let rng2 = thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(16)
+                .map(char::from)
+                .collect::<String>();
 
-        let rng = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(32)
-            .map(char::from)
-            .collect::<String>();
-        let rng2 = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect::<String>();
-
-        Ok(Client {
-            session_id: rng,
-            session_salt: rng2,
-            program_key: p_key,
-            variable_key: v_key,
-            version,
-            username: Arc::new(Mutex::from(String::from(""))),
-            password: Arc::new(Mutex::from(String::from(""))),
-            days: Arc::new(Mutex::new(0)),
-            server: server.to_string(),
-            stream,
-        })
+            return Ok(Client {
+                session_id: rng,
+                session_salt: rng2,
+                program_key: p_key,
+                variable_key: v_key,
+                version,
+                username: Arc::new(Mutex::from(String::from(""))),
+                password: Arc::new(Mutex::from(String::from(""))),
+                days: Arc::new(Mutex::new(0)),
+                server: server.to_string(),
+                stream,
+            });
+        }
+        Err(AuthServerError)
     }
 
     pub fn heartbeat_thread(stream: TcpStream, session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) {
