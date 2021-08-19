@@ -134,12 +134,12 @@ impl Client {
         buf.push(b'\n');
 
         let write_res = stream.write_all(buf.as_slice());
-        if let Err(_) = write_res{
+        if write_res.is_err(){
             return AuthResponse::default();
         }
         let mut buf: [u8; 512] = [0; 512];
         let read_res = stream.read(&mut buf);
-        if let Err(_) = read_res{
+        if read_res.is_err(){
             return AuthResponse::default();
         }
         let mut vb = Vec::from(buf);
