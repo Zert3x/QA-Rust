@@ -1,6 +1,6 @@
 use crate::packet::{AuthData, AuthResponse, HeartBeat, Login, Redeem, Register, SessionData, Var, PacketType};
 use crate::{SERVER_LIST};
-use chrono::{Utc};
+use chrono::{Utc, DateTime};
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 
@@ -100,7 +100,7 @@ impl Client {
     pub fn heartbeat_thread(stream: TcpStream, session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) {
         loop {
             let x = Self::communicate(stream.try_clone().unwrap(),PacketType::Heartbeat, serde_json::to_string(&Self::generate_heartbeat(session_id.clone(), session_salt.clone(), program_key.clone(), variable_key.clone(), username.clone(), password.clone(), hwid.clone(), version.clone())).unwrap());
-            if !x.status.eq("success") {
+            if !x.status.eq("success") && !x.is_default() {
                 println!("{}", x.message);
                 exit(0);
             }
@@ -144,7 +144,13 @@ impl Client {
         }
         let mut vb = Vec::from(buf);
         if !(PacketType::Response as u8).eq(&vb[0]) {
-            return AuthResponse::default();
+            return AuthResponse{
+                status: String::from("error"),
+                message: String::from("authentication did not return a valid response"),
+                data: None,
+                arr_data: None,
+                expiry: DateTime::from(Utc::now())
+            }
         }
         vb.remove(0);
         let msg = std::str::from_utf8(vb.as_slice()).expect("xxx");

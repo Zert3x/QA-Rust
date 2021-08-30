@@ -45,7 +45,7 @@ pub struct HeartBeat {
     pub(crate) ad: AuthData,
 }
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Deserialize, Clone, Debug, PartialEq)]
 pub struct AuthResponse {
     pub status: String,
     pub message: String,
@@ -53,6 +53,12 @@ pub struct AuthResponse {
     pub arr_data: Option<HashMap<String, String>>,
     #[serde(deserialize_with = "deserialize_from_str")]
     pub expiry: DateTime<FixedOffset>,
+}
+
+impl AuthResponse{
+    pub fn is_default(&self) -> bool{
+        Self::default().eq(self)
+    }
 }
 
 impl Default for AuthResponse {
