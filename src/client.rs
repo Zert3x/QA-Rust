@@ -63,45 +63,46 @@ impl Client {
     }
 
     pub fn new(p_key: String, v_key: String, version: String) -> Result<Client, AuthServerError> {
-        let server = SERVER_LIST.first().ok_or(AuthServerError)?;
+        for server in SERVER_LIST {
+            let sock_addr = SocketAddr::from_str(format!("{}:7005", server).as_str())
+                .ok()
+                .ok_or(AuthServerError)?;
+            let stream = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(3))
+                .ok()
+                .ok_or(AuthServerError)?;
 
-        let sock_addr = SocketAddr::from_str(format!("{}:7005", server).as_str())
-            .ok()
-            .ok_or(AuthServerError)?;
-        let stream = TcpStream::connect_timeout(&sock_addr, Duration::from_secs(3))
-            .ok()
-            .ok_or(AuthServerError)?;
+            let rng = thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(32)
+                .map(char::from)
+                .collect::<String>();
+            let rng2 = thread_rng()
+                .sample_iter(&Alphanumeric)
+                .take(16)
+                .map(char::from)
+                .collect::<String>();
 
-        let rng = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(32)
-            .map(char::from)
-            .collect::<String>();
-        let rng2 = thread_rng()
-            .sample_iter(&Alphanumeric)
-            .take(16)
-            .map(char::from)
-            .collect::<String>();
-
-        Ok(Client {
-            session_id: rng,
-            session_salt: rng2,
-            program_key: p_key,
-            variable_key: v_key,
-            version,
-            username: Arc::new(Mutex::from(String::from(""))),
-            password: Arc::new(Mutex::from(String::from(""))),
-            days: Arc::new(Mutex::new(0)),
-            server: server.to_string(),
-            stream,
-        })
+            return Ok(Client {
+                session_id: rng,
+                session_salt: rng2,
+                program_key: p_key,
+                variable_key: v_key,
+                version,
+                username: Arc::new(Mutex::from(String::from(""))),
+                password: Arc::new(Mutex::from(String::from(""))),
+                days: Arc::new(Mutex::new(0)),
+                server: server.to_string(),
+                stream,
+            });
+        }
+        Err(AuthServerError)
     }
 
     pub fn heartbeat_thread(stream: TcpStream, session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) {
         loop {
             let x = Self::communicate(stream.try_clone().unwrap(),PacketType::Heartbeat, serde_json::to_string(&Self::generate_heartbeat(session_id.clone(), session_salt.clone(), program_key.clone(), variable_key.clone(), username.clone(), password.clone(), hwid.clone(), version.clone())).unwrap());
             if !x.status.eq("success") && !x.is_default() {
-                println!("{}", x.message);
+                println!("Suspicious activity detected.");
                 exit(0);
             }
             std::thread::sleep(Duration::from_secs(5));
@@ -150,14 +151,18 @@ impl Client {
                 data: None,
                 arr_data: None,
                 expiry: DateTime::from(Utc::now())
-            }
+            };
         }
         vb.remove(0);
-        let msg = std::str::from_utf8(vb.as_slice()).expect("xxx");
-        let m = msg.trim_matches(char::from(0));
-        let m = m.trim_end_matches('\n');
+        if let Ok(msg) = std::str::from_utf8(vb.as_slice()) {
+            let m = msg.trim_matches(char::from(0));
+            let m = m.trim_end_matches('\n');
 
-        serde_json::from_str(m).expect("bad server response")
+            if let Ok(response) = serde_json::from_str::<AuthResponse>(m) {
+                return response;
+            }
+        }
+        Default::default()
     }
 
     fn generate_auth_data(&self) -> AuthData {
@@ -263,7 +268,6 @@ impl Client {
         let mut result = vec![0; data.len() + t.block_size()];
         let mut len = d.update(data, &mut result).unwrap();
         len += d.finalize(&mut result).unwrap();
-        println!("{}", result.iter().map(|x| *x as char).collect::<String>());
         result.truncate(len);
 
         result.into_iter().map(|x| x as char).collect::<String>()
