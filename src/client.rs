@@ -98,10 +98,17 @@ impl Client {
         Err(AuthServerError)
     }
 
-    pub fn heartbeat_thread(stream: TcpStream, session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) {
+    pub fn heartbeat_thread(mut stream: TcpStream, session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) {
         loop {
             let x = Self::communicate(stream.try_clone().unwrap(),PacketType::Heartbeat, serde_json::to_string(&Self::generate_heartbeat(session_id.clone(), session_salt.clone(), program_key.clone(), variable_key.clone(), username.clone(), password.clone(), hwid.clone(), version.clone())).unwrap());
             if !x.status.eq("success") {
+                if let Some(sock_addr) = SocketAddr::from_str(format!("{}:7005", SERVER_LIST.first().unwrap()).as_str())
+                    .ok() {
+                    if let Ok(s) = TcpStream::connect(&sock_addr) {
+                        stream = s;
+                        continue;
+                    }
+                }
                 println!("Suspicious activity detected.");
                 exit(0);
             }
@@ -135,7 +142,8 @@ impl Client {
         buf.push(b'\n');
 
         let write_res = stream.write_all(buf.as_slice());
-        if write_res.is_err(){
+        if write_res.is_err() {
+
             return AuthResponse::default();
         }
         let mut buf: [u8; 512] = [0; 512];
