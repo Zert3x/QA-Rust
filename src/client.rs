@@ -20,9 +20,6 @@ use std::time::Duration;
 
 use openssl::symm::{Cipher, Crypter, Mode};
 
-#[cfg(windows)]
-use crate::virtualizer;
-
 #[derive(Clone, Debug)]
 pub struct AuthServerError;
 impl fmt::Display for AuthServerError {

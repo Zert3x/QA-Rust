@@ -9,9 +9,7 @@ extern crate openssl;
 
 pub mod client;
 mod packet;
-mod utils;
-#[cfg(windows)]
-mod virtualizer;
+mod utils;;
 
 #[cfg(test)]
 mod tests {
