@@ -1,6 +1,8 @@
-use crate::packet::{AuthData, AuthResponse, HeartBeat, Login, Redeem, Register, SessionData, Var, PacketType};
-use crate::{SERVER_LIST};
-use chrono::{Utc};
+use crate::packet::{
+    AuthData, AuthResponse, HeartBeat, Login, PacketType, Redeem, Register, SessionData, Var,
+};
+use crate::SERVER_LIST;
+use chrono::Utc;
 use rand::distributions::Alphanumeric;
 use rand::{thread_rng, Rng};
 
@@ -9,14 +11,17 @@ use std::fmt::Formatter;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
 
+use crate::utils::get_id;
+use std::collections::HashMap;
+use std::process::exit;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration};
-use crate::utils::get_id;
-use std::process::exit;
-use std::collections::HashMap;
+use std::time::Duration;
 
 use openssl::symm::{Cipher, Crypter, Mode};
+
+#[cfg(windows)]
+use crate::virtualizer;
 
 #[derive(Clone, Debug)]
 pub struct AuthServerError;
@@ -98,17 +103,69 @@ impl Client {
         Err(AuthServerError)
     }
 
-    pub fn heartbeat_thread(mut stream: TcpStream, session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) {
+    pub fn start_heartbeat_thread(&self) {
+        let session_id = self.session_id.clone();
+        let session_salt = self.session_salt.clone();
+        let program_key = self.program_key.clone();
+        let variable_key = self.variable_key.clone();
+        let version = self.version.clone();
+
+        let username = self.username.lock().unwrap().to_string();
+        let password = self.password.lock().unwrap().to_string();
+
+        let stream = self.stream.try_clone().unwrap();
+        let hwid = get_id();
+        std::thread::spawn(move || {
+            Self::heartbeat_thread(
+                stream,
+                session_id,
+                session_salt,
+                program_key,
+                variable_key,
+                username,
+                password,
+                hwid,
+                version,
+            )
+        });
+    }
+
+    fn heartbeat_thread(
+        mut stream: TcpStream,
+        session_id: String,
+        session_salt: String,
+        program_key: String,
+        variable_key: String,
+        username: String,
+        password: String,
+        hwid: String,
+        version: String,
+    ) {
         loop {
-            let x = Self::communicate(stream.try_clone().unwrap(),PacketType::Heartbeat, serde_json::to_string(&Self::generate_heartbeat(session_id.clone(), session_salt.clone(), program_key.clone(), variable_key.clone(), username.clone(), password.clone(), hwid.clone(), version.clone())).unwrap());
+            let x = Self::communicate(
+                stream.try_clone().unwrap(),
+                PacketType::Heartbeat,
+                serde_json::to_string(&Self::generate_heartbeat(
+                    session_id.clone(),
+                    session_salt.clone(),
+                    program_key.clone(),
+                    variable_key.clone(),
+                    username.clone(),
+                    password.clone(),
+                    hwid.clone(),
+                    version.clone(),
+                ))
+                .unwrap(),
+            );
+
             if !x.status.eq("success") {
-                if let Some(sock_addr) = SocketAddr::from_str(format!("{}:7005", SERVER_LIST.first().unwrap()).as_str())
+                /*if let Some(sock_addr) = SocketAddr::from_str(format!("{}:7005", SERVER_LIST.first().unwrap()).as_str())
                     .ok() {
                     if let Ok(s) = TcpStream::connect(&sock_addr) {
                         stream = s;
                         continue;
                     }
-                }
+                }*/
                 println!("Suspicious activity detected.");
                 exit(0);
             }
@@ -116,7 +173,16 @@ impl Client {
         }
     }
 
-    fn generate_heartbeat(session_id: String, session_salt: String, program_key: String, variable_key: String, username: String, password: String, hwid: String, version: String) -> HeartBeat {
+    fn generate_heartbeat(
+        session_id: String,
+        session_salt: String,
+        program_key: String,
+        variable_key: String,
+        username: String,
+        password: String,
+        hwid: String,
+        version: String,
+    ) -> HeartBeat {
         let cur = Utc::now();
         HeartBeat {
             sd: SessionData {
@@ -135,35 +201,49 @@ impl Client {
         }
     }
 
-    fn communicate(mut stream: TcpStream, packet_type: PacketType, packet_str: String) -> AuthResponse {
+    fn communicate(
+        mut stream: TcpStream,
+        packet_type: PacketType,
+        packet_str: String,
+    ) -> AuthResponse {
         let mut p_buf = Vec::from(packet_str.as_bytes());
         let mut buf: Vec<u8> = vec![packet_type as u8];
         buf.append(&mut p_buf);
         buf.push(b'\n');
-
         let write_res = stream.write_all(buf.as_slice());
         if write_res.is_err() {
-
             return AuthResponse::default();
         }
-        let mut buf: [u8; 512] = [0; 512];
-        let read_res = stream.read(&mut buf);
-        if read_res.is_err(){
-            return AuthResponse::default();
-        }
-        let mut vb = Vec::from(buf);
-        if !(PacketType::Response as u8).eq(&vb[0]) {
-            return AuthResponse::default();
-        }
-        vb.remove(0);
-        if let Ok(msg) = std::str::from_utf8(vb.as_slice()) {
-            let m = msg.trim_matches(char::from(0));
-            let m = m.trim_end_matches('\n');
-
-            if let Ok(response) = serde_json::from_str::<AuthResponse>(m) {
-                return response;
+        let mut recv_buf = vec![];
+        loop {
+            let mut buf: [u8; 8192] = [0; 8192];
+            match stream.read(&mut buf) {
+                Ok(n) => {
+                    recv_buf.extend_from_slice(&buf);
+                    if buf.contains(&('\n' as u8)) {
+                        break;
+                    }
+                }
+                Err(_) => {}
             }
         }
+
+        if !(PacketType::Response as u8).eq(&recv_buf[0]) {
+            return AuthResponse::default();
+        }
+        recv_buf.remove(0);
+        if let Ok(msg) = std::str::from_utf8(recv_buf.as_slice()) {
+            let m = msg.replace(char::from(0), "");
+            let m = m.trim_end_matches('\n');
+
+            match serde_json::from_str::<AuthResponse>(m) {
+                Ok(response) => {
+                    return response;
+                }
+                Err(_) => {}
+            }
+        }
+
         Default::default()
     }
 
@@ -192,23 +272,14 @@ impl Client {
             ad: self.generate_auth_data(),
         };
 
-        let resp = Self::communicate(self.stream.try_clone().unwrap(), PacketType::Authenticate, serde_json::to_string(&packet).expect("poorly formed"));
+        let resp = Self::communicate(
+            self.stream.try_clone().unwrap(),
+            PacketType::Authenticate,
+            serde_json::to_string(&packet).expect("poorly formed"),
+        );
         *self.days.lock().expect("d_lock") =
             resp.expiry.signed_duration_since(Utc::now()).num_days() as u64;
-        if resp.status.eq("success") {
-            let session_id = self.session_id.clone();
-            let session_salt = self.session_salt.clone();
-            let program_key = self.program_key.clone();
-            let variable_key = self.variable_key.clone();
-            let version = self.version.clone();
 
-            let username = self.username.lock().unwrap().to_string();
-            let password = self.password.lock().unwrap().to_string();
-
-            let stream = self.stream.try_clone().unwrap();
-            let hwid = get_id();
-            std::thread::spawn(move || Self::heartbeat_thread(stream, session_id, session_salt, program_key, variable_key, username, password, hwid, version));
-        }
         resp
     }
 
@@ -232,7 +303,11 @@ impl Client {
             token,
         };
 
-        Self::communicate(self.stream.try_clone().unwrap(),PacketType::Register, serde_json::to_string(&packet).expect("poorly formed"))
+        Self::communicate(
+            self.stream.try_clone().unwrap(),
+            PacketType::Register,
+            serde_json::to_string(&packet).expect("poorly formed"),
+        )
     }
 
     pub fn redeem(&mut self, username: String, password: String, token: String) -> AuthResponse {
@@ -248,41 +323,62 @@ impl Client {
             token,
         };
 
-        Self::communicate(self.stream.try_clone().unwrap(),PacketType::Redeem, serde_json::to_string(&packet).expect("poorly formed"))
+        Self::communicate(
+            self.stream.try_clone().unwrap(),
+            PacketType::Redeem,
+            serde_json::to_string(&packet).expect("poorly formed"),
+        )
     }
 
-    pub fn variable(&mut self, name: &str) -> String {
+    pub fn variable(&self, name: &str) -> String {
         let packet = Var {
-            sd: SessionData { session_id: self.session_id.to_string(), session_salt: self.session_salt.to_string() },
+            sd: SessionData {
+                session_id: self.session_id.to_string(),
+                session_salt: self.session_salt.to_string(),
+            },
             ad: self.generate_auth_data(),
             name: name.to_string(),
         };
 
-        let resp = Self::communicate(self.stream.try_clone().unwrap(), PacketType::Variable, serde_json::to_string(&packet).expect("poorly formed"));
+        let resp = Self::communicate(
+            self.stream.try_clone().unwrap(),
+            PacketType::Variable,
+            serde_json::to_string(&packet).expect("poorly formed"),
+        );
         let data = base64::decode(resp.data.unwrap()).unwrap();
 
         let iv = &data[..16];
         let data = &data[16..];
-        println!("{}", data.iter().map(|x| *x as char).collect::<String>());
         let t = Cipher::aes_256_cbc();
         let mut d = Crypter::new(t, Mode::Decrypt, self.variable_key.as_bytes(), Some(iv))
             .expect("failed to decrypt, possible malicious activity.");
         let mut result = vec![0; data.len() + t.block_size()];
         let mut len = d.update(data, &mut result).unwrap();
-        len += d.finalize(&mut result).unwrap();
+        len += d.finalize(&mut result[len..]).unwrap();
         result.truncate(len);
 
-        result.into_iter().map(|x| x as char).collect::<String>()
+        result
+            .into_iter()
+            .map(|x| x as char)
+            .collect::<String>()
+            .replace("}]}]", "}]")
     }
 
     pub fn all_variables(&mut self) -> HashMap<String, String> {
         let packet = Var {
-            sd: SessionData { session_id: self.session_id.to_string(), session_salt: self.session_salt.to_string() },
+            sd: SessionData {
+                session_id: self.session_id.to_string(),
+                session_salt: self.session_salt.to_string(),
+            },
             ad: self.generate_auth_data(),
-            name: "all".to_string()
+            name: "all".to_string(),
         };
 
-        let resp = Self::communicate(self.stream.try_clone().unwrap(), PacketType::Variable, serde_json::to_string(&packet).expect("poorly formed"));
+        let resp = Self::communicate(
+            self.stream.try_clone().unwrap(),
+            PacketType::Variable,
+            serde_json::to_string(&packet).expect("poorly formed"),
+        );
         let mut map = HashMap::new();
         for (x, y) in resp.arr_data.unwrap() {
             let data = base64::decode(y).unwrap();
@@ -294,13 +390,14 @@ impl Client {
             let mut d = Crypter::new(t, Mode::Decrypt, self.variable_key.as_bytes(), Some(iv))
                 .expect("failed to decrypt, possible malicious activity.");
             let mut result = vec![0; data.len() + t.block_size()];
-            d.update(data, &mut result).unwrap();
-            let len = d.finalize(&mut result).unwrap();
+            let mut len = d.update(data, &mut result).unwrap();
+            len += d.finalize(&mut result[len..]).unwrap();
             result.truncate(len);
             drop(d);
 
             map.insert(x, result.into_iter().map(|x| x as char).collect::<String>());
         }
+
         map
     }
 }
