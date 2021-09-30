@@ -9,7 +9,7 @@ extern crate openssl;
 
 pub mod client;
 mod packet;
-mod utils;;
+mod utils;
 
 #[cfg(test)]
 mod tests {
