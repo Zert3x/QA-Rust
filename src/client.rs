@@ -156,13 +156,13 @@ impl Client {
             );
 
             if !x.status.eq("success") {
-                /*if let Some(sock_addr) = SocketAddr::from_str(format!("{}:7005", SERVER_LIST.first().unwrap()).as_str())
+                if let Some(sock_addr) = SocketAddr::from_str(format!("{}:7005", SERVER_LIST.first().unwrap()).as_str())
                     .ok() {
                     if let Ok(s) = TcpStream::connect(&sock_addr) {
                         stream = s;
                         continue;
                     }
-                }*/
+                }
                 println!("Suspicious activity detected.");
                 exit(0);
             }
