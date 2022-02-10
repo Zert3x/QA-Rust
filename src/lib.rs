@@ -47,7 +47,7 @@ mod tests {
             String::from("0.0.1"),
         );
         assert!(client.is_ok(), "{}", true);
-        let mut client = client.unwrap();
+        let client = client.unwrap();
 
         let _resp = client.login(String::from("user"), String::from("password"));
         assert!(_resp.status.eq("success"), "{}", true);
@@ -71,6 +71,19 @@ mod tests {
         let var = client.all_variables();
         assert!(var.get("test").unwrap().eq("test"), "{}", true);
         assert!(var.get("test1").unwrap().eq("testing"), "{}", true);
+    }
+
+    #[test]
+    fn vpn_test(){
+        use std::time::Duration;
+        let client = Client::new(
+            "Ol8Y17q7MNe5HPWUhKy0wIhLsuNGtabtazVXpfq37vrmYoY3dDjUTvOyAEHKG47K".into(),
+            "OLhoem4vyvTKFzk4EIiXcMRWZ8Fr5RkK".into(),
+            "1.0".into()
+        ).unwrap();
+        let _resp = client.login("test".into(), "test".into());
+        //Sleep 2 minutes to connect a VPN and check for crashes
+        std::thread::sleep(Duration::from_secs(120));
     }
 }
 
