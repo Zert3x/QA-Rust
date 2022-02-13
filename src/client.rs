@@ -19,6 +19,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use openssl::symm::{Cipher, Crypter, Mode};
+use rand::prelude::SliceRandom;
 
 #[derive(Clone, Debug)]
 pub struct AuthServerError;
@@ -156,15 +157,29 @@ impl Client {
             );
 
             if !x.status.eq("success") {
-                /*if let Some(sock_addr) = SocketAddr::from_str(format!("{}:7005", SERVER_LIST.first().unwrap()).as_str())
-                    .ok() {
-                    if let Ok(s) = TcpStream::connect(&sock_addr) {
-                        stream = s;
-                        continue;
+                let mut rng = thread_rng();
+                let random_server  = SERVER_LIST.choose(&mut rng).unwrap();
+                if let Ok(sock_addr) = SocketAddr::from_str(format!("{}:7005", random_server).as_str()){
+                    let mut s = None;
+                    for _ in 0..5{
+                        if let Ok(new_stream) = TcpStream::connect(sock_addr){
+                            s = Some(new_stream);
+                            break
+                        }
+                        //If the stream connection failed, retry it after 2 seconds
+                        std::thread::sleep(Duration::from_secs(2));
                     }
-                }*/
-                println!("Suspicious activity detected.");
-                exit(0);
+                    match s{
+                        Some(fixed_stream) => {
+                            stream = fixed_stream;
+                            continue;
+                        },
+                        None => {
+                            println!("Suspicious activity detected.");
+                            exit(0);
+                        }
+                    }
+                }
             }
             std::thread::sleep(Duration::from_secs(5));
         }
@@ -215,7 +230,7 @@ impl Client {
         loop {
             let mut buf: [u8; 8192] = [0; 8192];
             match stream.read(&mut buf) {
-                Ok(n) => {
+                Ok(_) => {
                     recv_buf.extend_from_slice(&buf);
                     if buf.contains(&('\n' as u8)) {
                         break;
